@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chuyển Ảnh Sang Văn Bản</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for font and scrollbar if needed, though Tailwind covers most */
+        body {
+            font-family: "Inter", sans-serif;
+        }
+        /* Hide scrollbar for webkit browsers */
+        .overflow-y-auto::-webkit-scrollbar {
+            display: none;
+        }
+        /* Hide scrollbar for IE, Edge and Firefox */
+        .overflow-y-auto {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100 flex flex-col items-center justify-center p-4 font-sans antialiased">
+
+    <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-4xl transform transition-all duration-300 hover:scale-105">
+        <h1 class="text-4xl font-extrabold text-center text-purple-800 mb-8">
+            <span role="img" aria-label="camera" class="mr-2">📸</span>
+            Chuyển Ảnh Sang Văn Bản
+        </h1>
+
+        <div class="mb-6">
+            <label for="image-upload" class="block text-lg font-medium text-gray-700 mb-2">
+                Chọn một hoặc nhiều hình ảnh:
+            </label>
+            <input
+                type="file"
+                id="image-upload"
+                accept="image/*"
+                multiple
+                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+            >
+            <div id="selected-images-preview" class="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                </div>
+        </div>
+
+        <button
+            id="ocr-button"
+            class="w-full py-3 px-6 rounded-lg text-white font-semibold text-lg shadow-md transition duration-300 ease-in-out bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 transform hover:-translate-y-0.5"
+        >
+            Chuyển đổi thành văn bản
+        </button>
+
+        <div id="global-error-message" class="mt-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center hidden">
+            </div>
+
+        <div id="extracted-results-section" class="mt-8 bg-purple-50 p-6 rounded-lg shadow-inner border border-purple-200 hidden">
+            <h2 class="text-2xl font-bold text-purple-700 mb-4 flex items-center">
+                <span role="img" aria-label="document" class="mr-2">📄</span>
+                Kết quả trích xuất:
+            </h2>
+            <div id="results-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                </div>
+            <button
+                id="copy-all-button"
+                class="mt-6 w-full py-2 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transform hover:-translate-y-0.5"
+            >
+                Sao chép tất cả văn bản
+            </button>
+            <div id="copy-message" class="mt-2 text-green-700 text-sm text-center hidden">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for managing state
+        let selectedImages = [];
+        let extractedResults = []; // Stores { file: File, text: string, error: string }
+        let loading = false;
+
+        // DOM Elements
+        const imageUploadInput = document.getElementById('image-upload');
+        const selectedImagesPreview = document.getElementById('selected-images-preview');
+        const ocrButton = document.getElementById('ocr-button');
+        const globalErrorMessage = document.getElementById('global-error-message');
+        const extractedResultsSection = document.getElementById('extracted-results-section');
+        const resultsGrid = document.getElementById('results-grid');
+        const copyAllButton = document.getElementById('copy-all-button');
+        const copyMessageElement = document.getElementById('copy-message');
+
+        // Function to update loading state and UI
+        function setLoadingState(isLoading) {
+            loading = isLoading;
+            if (isLoading) {
+                ocrButton.disabled = true;
+                ocrButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+                ocrButton.classList.remove('bg-purple-600', 'hover:bg-purple-700', 'transform', 'hover:-translate-y-0.5');
+                ocrButton.innerHTML = `
+                    <span class="flex items-center justify-center">
+                        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Đang xử lý...
+                    </span>
+                `;
+            } else {
+                ocrButton.disabled = selectedImages.length === 0;
+                ocrButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
+                ocrButton.classList.add('bg-purple-600', 'hover:bg-purple-700', 'transform', 'hover:-translate-y-0.5');
+                ocrButton.innerHTML = 'Chuyển đổi thành văn bản';
+            }
+        }
+
+        // Function to display global error message
+        function setGlobalError(message) {
+            if (message) {
+                globalErrorMessage.textContent = message;
+                globalErrorMessage.classList.remove('hidden');
+            } else {
+                globalErrorMessage.classList.add('hidden');
+                globalErrorMessage.textContent = '';
+            }
+        }
+
+        // Function to display copy message
+        function showCopyMessage(message) {
+            copyMessageElement.textContent = message;
+            copyMessageElement.classList.remove('hidden');
+            setTimeout(() => {
+                copyMessageElement.classList.add('hidden');
+                copyMessageElement.textContent = '';
+            }, 3000);
+        }
+
+        // Handles image file selection
+        imageUploadInput.addEventListener('change', (event) => {
+            selectedImages = Array.from(event.target.files);
+            extractedResults = []; // Clear previous results
+            setGlobalError('');
+            showCopyMessage('');
+            
+            // Update OCR button state
+            setLoadingState(false); // Reset button state
+            ocrButton.disabled = selectedImages.length === 0;
+            if (selectedImages.length === 0) {
+                ocrButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+                ocrButton.classList.remove('bg-purple-600', 'hover:bg-purple-700', 'transform', 'hover:-translate-y-0.5');
+            } else {
+                ocrButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
+                ocrButton.classList.add('bg-purple-600', 'hover:bg-purple-700', 'transform', 'hover:-translate-y-0.5');
+            }
+
+            // Display image previews
+            selectedImagesPreview.innerHTML = ''; // Clear previous previews
+            if (selectedImages.length > 0) {
+                selectedImages.forEach((image, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'text-center';
+                    const img = document.createElement('img');
+                    img.src = URL.createObjectURL(image);
+                    img.alt = `Ảnh đã chọn ${index + 1}`;
+                    img.className = 'max-h-32 w-full object-contain mx-auto rounded-lg shadow-md border border-gray-200';
+                    const p = document.createElement('p');
+                    p.className = 'text-xs text-gray-600 mt-1 truncate';
+                    p.textContent = image.name;
+
+                    div.appendChild(img);
+                    div.appendChild(p);
+                    selectedImagesPreview.appendChild(div);
+                });
+            }
+            extractedResultsSection.classList.add('hidden'); // Hide results section until OCR is run
+            resultsGrid.innerHTML = ''; // Clear results grid
+        });
+
+        // Converts image file to Base64 string
+        function getBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = (error) => reject(error);
+            });
+        }
+
+        // Function to perform OCR for a single image and update its result
+        async function performOcrForImage(image, resultIndex) {
+            let extractedText = '';
+            let extractionError = '';
+
+            // Temporarily update the specific result to show loading state
+            extractedResults[resultIndex].text = ''; // Clear previous text
+            extractedResults[resultIndex].error = ''; // Clear previous error
+            extractedResults[resultIndex].loading = true; // Add a loading flag
+            renderResults(); // Re-render to show loading spinner for this item
+
+            try {
+                const base64ImageData = await getBase64(image);
+                const prompt = "Trích xuất tất cả văn bản từ hình ảnh này.";
+
+                const payload = {
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [
+                                { text: prompt },
+                                {
+                                    inlineData: {
+                                        mimeType: image.type,
+                                        data: base64ImageData
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                };
+
+                // In the Canvas environment, the API key is provided automatically.
+                // If running locally, replace this with your actual API key obtained from Google AI Studio.
+                const apiKey = "AIzaSyDis9iQyqeofh7TBizqoYTDOIxynNGf-MU"; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    const errorMessage = errorData.error?.message || `Lỗi HTTP: ${response.status}`;
+                    extractionError = `Lỗi: ${errorMessage}`;
+                } else {
+                    const result = await response.json();
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        extractedText = result.candidates[0].content.parts[0].text;
+                    } else {
+                        extractedText = 'Không thể trích xuất văn bản (cấu trúc phản hồi không mong muốn).';
+                    }
+                }
+            } catch (innerErr) {
+                console.error(`Lỗi xử lý ảnh ${image.name}:`, innerErr);
+                extractionError = `Đã xảy ra lỗi khi xử lý: ${innerErr.message}`;
+            } finally {
+                // Update the specific result with the final text/error and remove loading flag
+                extractedResults[resultIndex].text = extractedText;
+                extractedResults[resultIndex].error = extractionError;
+                extractedResults[resultIndex].loading = false;
+                renderResults(); // Re-render to show final state
+            }
+        }
+
+
+        // Performs OCR for all selected images
+        ocrButton.addEventListener('click', async () => {
+            if (selectedImages.length === 0) {
+                setGlobalError('Vui lòng chọn ít nhất một hình ảnh trước.');
+                return;
+            }
+
+            setLoadingState(true);
+            setGlobalError('');
+            extractedResults = []; // Clear previous results before starting new OCR
+            resultsGrid.innerHTML = ''; // Clear results display
+            extractedResultsSection.classList.add('hidden'); // Hide section during processing
+
+            // Initialize results array with loading state for each image
+            selectedImages.forEach(image => {
+                extractedResults.push({
+                    file: image,
+                    text: '',
+                    error: '',
+                    loading: true // Set loading state for initial run
+                });
+            });
+            renderResults(); // Render initial loading state for all images
+            extractedResultsSection.classList.remove('hidden'); // Show section immediately
+
+            try {
+                for (let i = 0; i < selectedImages.length; i++) {
+                    await performOcrForImage(selectedImages[i], i);
+                }
+            } catch (outerErr) {
+                console.error("Lỗi chung trong quá trình OCR:", outerErr);
+                setGlobalError(`Đã xảy ra lỗi chung: ${outerErr.message}`);
+            } finally {
+                setLoadingState(false);
+            }
+        });
+
+        // Function to render results to the DOM
+        function renderResults() {
+            resultsGrid.innerHTML = ''; // Clear current display
+            extractedResults.forEach((result, index) => {
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'bg-white p-4 rounded-lg shadow-md border border-gray-300 flex flex-col items-center';
+                
+                let contentHtml = '';
+                if (result.loading) {
+                    contentHtml = `
+                        <span class="flex items-center justify-center text-gray-500 py-4">
+                            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Đang xử lý...
+                        </span>
+                    `;
+                } else if (result.error) {
+                    contentHtml = `<p class="text-red-600 font-medium">${result.error}</p>`;
+                } else {
+                    contentHtml = result.text || 'Không có văn bản được trích xuất.';
+                }
+
+                resultDiv.innerHTML = `
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2 truncate w-full text-center">${result.file.name}</h3>
+                    <img
+                        src="${URL.createObjectURL(result.file)}"
+                        alt="Ảnh ${result.file.name}"
+                        class="max-h-48 w-full object-contain mb-4 rounded-lg border border-gray-200"
+                    />
+                    <div class="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap w-full max-h-40 overflow-y-auto border border-gray-200 p-2 rounded-md bg-gray-50">
+                        ${contentHtml}
+                    </div>
+                    <div class="flex flex-col sm:flex-row gap-2 mt-4 w-full">
+                        <button
+                            id="copy-btn-${index}"
+                            class="flex-1 py-2 px-4 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transform hover:-translate-y-0.5"
+                        >
+                            Sao chép văn bản này
+                        </button>
+                        <button
+                            id="save-btn-${index}"
+                            class="flex-1 py-2 px-4 bg-yellow-500 hover:bg-yellow-600 text-white font-semibold rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-2 transform hover:-translate-y-0.5"
+                        >
+                            Lưu thành tệp văn bản
+                        </button>
+                    </div>
+                `;
+                resultsGrid.appendChild(resultDiv);
+
+                // Add event listeners for the newly created buttons
+                document.getElementById(`copy-btn-${index}`).addEventListener('click', () => {
+                    copyTextToClipboard(result.text || result.error, result.file.name);
+                });
+                document.getElementById(`save-btn-${index}`).addEventListener('click', () => {
+                    saveTextAsFile(result.text || result.error, result.file.name);
+                });
+            });
+        }
+
+        // Function to copy individual extracted text to clipboard
+        function copyTextToClipboard(textToCopy, fileName) {
+            if (textToCopy) {
+                const textarea = document.createElement('textarea');
+                textarea.value = textToCopy;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showCopyMessage(`Văn bản từ "${fileName}" đã được sao chép!`);
+            }
+        }
+
+        // Function to save text as a .txt file
+        function saveTextAsFile(textToSave, originalFileName) {
+            if (!textToSave) {
+                showCopyMessage('Không có văn bản để lưu.');
+                return;
+            }
+
+            const blob = new Blob([textToSave], { type: 'text/plain;charset=utf-8' });
+            const fileNameWithoutExtension = originalFileName.split('.').slice(0, -1).join('.');
+            const downloadFileName = `${fileNameWithoutExtension}_extracted.txt`;
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = downloadFileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href); // Clean up the URL object
+            showCopyMessage(`Đã lưu tệp "${downloadFileName}"!`);
+        }
+
+        // Function to copy all extracted text to clipboard
+        copyAllButton.addEventListener('click', () => {
+            if (extractedResults.length > 0) {
+                const allText = extractedResults.map(res => 
+                    `--- Văn bản từ ảnh: ${res.file.name} ---\n${res.text || res.error}\n`
+                ).join('\n'); // Join with an extra newline for separation
+
+                const textarea = document.createElement('textarea');
+                textarea.value = allText;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showCopyMessage('Tất cả văn bản đã được sao chép!');
+            }
+        });
+
+        // Initial state setup
+        setLoadingState(false); // Ensure button is enabled initially if no images selected
+        ocrButton.disabled = true; // Disable button until images are selected
+        ocrButton.classList.add('bg-gray-400', 'cursor-not-allowed');
+        ocrButton.classList.remove('bg-purple-600', 'hover:bg-purple-700', 'transform', 'hover:-translate-y-0.5');
+
+    </script>
+</body>
+</html>

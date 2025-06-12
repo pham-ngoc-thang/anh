@@ -233,7 +233,8 @@
 
         // Handles image file selection
         imageUploadInput.addEventListener('change', (event) => {
-            selectedImages = Array.from(event.target.files);
+            // Add new files to the existing selectedImages array
+            selectedImages = selectedImages.concat(Array.from(event.target.files));
             updateUIBasedOnSelectedImages();
             // Clear the input after selecting to allow re-selection of same files if needed
             event.target.value = '';
@@ -475,7 +476,7 @@
             event.preventDefault(); // Prevent default paste behavior (e.g., pasting text into a text field)
 
             const clipboardItems = event.clipboardData.items;
-            let imageFound = false;
+            let imagesPasted = 0; // Counter for images pasted
 
             for (let i = 0; i < clipboardItems.length; i++) {
                 const item = clipboardItems[i];
@@ -483,41 +484,30 @@
                 if (item.kind === 'file' && item.type.startsWith('image/')) {
                     const blob = item.getAsFile();
                     // Create a File object from the blob. Give it a default name.
-                    const newFile = new File([blob], `pasted_image_${Date.now()}.png`, { type: blob.type });
+                    const newFile = new File([blob], `pasted_image_${Date.now() + i}.png`, { type: blob.type });
                     
-                    selectedImages = [newFile]; // Replace existing images with the pasted one(s)
-                    // If you want to add to existing images instead of replacing:
-                    // selectedImages.push(newFile); 
-
-                    updateUIBasedOnSelectedImages();
-                    imageFound = true;
-                    setGlobalError(''); // Clear any previous error
-                    break; // Only process the first image found
+                    selectedImages.push(newFile); // ***************** CHỈNH SỬA Ở ĐÂY *****************
+                    imagesPasted++;
                 }
             }
 
-            if (!imageFound) {
+            if (imagesPasted > 0) {
+                updateUIBasedOnSelectedImages();
+                setGlobalError(''); // Clear any previous error
+                if (imagesPasted > 1) {
+                    showCopyMessage(`Đã dán ${imagesPasted} ảnh từ clipboard.`);
+                } else {
+                    showCopyMessage(`Đã dán 1 ảnh từ clipboard.`);
+                }
+            } else {
                 setGlobalError('Không tìm thấy hình ảnh nào trong clipboard để dán.');
             }
+            // Ensure overlay is removed after paste attempt
+            pasteOverlay.classList.remove('active');
         });
 
         // Optional: Provide visual feedback for pasting
-        document.body.addEventListener('dragenter', (e) => {
-            if (e.dataTransfer.types.includes('Files')) {
-                // Not strictly for paste, but good for drag-and-drop visual
-                // pasteOverlay.classList.add('active');
-            }
-        });
-
-        document.body.addEventListener('dragleave', (e) => {
-            // pasteOverlay.classList.remove('active');
-        });
-
-        document.body.addEventListener('drop', (e) => {
-            // pasteOverlay.classList.remove('active');
-        });
-        
-        // Show overlay when pressing Ctrl+V
+        // We'll keep the keydown/keyup for paste overlay
         document.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
                 pasteOverlay.classList.add('active');
@@ -525,16 +515,9 @@
         });
 
         document.addEventListener('keyup', (e) => {
+            // Only hide if the keys are released and overlay is active
             if (pasteOverlay.classList.contains('active') && (!e.ctrlKey && !e.metaKey && e.key !== 'v')) {
                  pasteOverlay.classList.remove('active');
-            }
-        });
-        document.body.addEventListener('mousemove', () => {
-            // Remove overlay if mouse moves significantly after keyup, implies user is not pasting
-            if (pasteOverlay.classList.contains('active')) {
-                // This is a bit aggressive, you might want a timeout
-                // Or tie it to the paste event itself
-                // For simplicity, we'll rely on keyup for now.
             }
         });
 

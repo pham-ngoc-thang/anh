@@ -19,6 +19,33 @@
             -ms-overflow-style: none;  /* IE and Edge */
             scrollbar-width: none;  /* Firefox */
         }
+        /* Style for paste overlay */
+        #paste-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            font-weight: bold;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease-in-out;
+            border: 5px dashed rgba(255, 255, 255, 0.7);
+            box-sizing: border-box;
+            text-align: center;
+            line-height: 1.5;
+        }
+        #paste-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-purple-50 to-indigo-100 flex flex-col items-center justify-center p-4 font-sans antialiased">
@@ -41,7 +68,10 @@
                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-purple-500 focus:border-purple-500 transition duration-200 ease-in-out file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
             >
             <div id="selected-images-preview" class="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                </div>
+            </div>
+            <p class="text-sm text-gray-500 mt-2 text-center">
+                Hoặc dán ảnh từ clipboard (Ctrl+V) sau khi chụp màn hình.
+            </p>
         </div>
 
         <button
@@ -52,7 +82,7 @@
         </button>
 
         <div id="global-error-message" class="mt-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center hidden">
-            </div>
+        </div>
 
         <div id="extracted-results-section" class="mt-8 bg-purple-50 p-6 rounded-lg shadow-inner border border-purple-200 hidden">
             <h2 class="text-2xl font-bold text-purple-700 mb-4 flex items-center">
@@ -60,7 +90,7 @@
                 Kết quả trích xuất:
             </h2>
             <div id="results-grid" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                </div>
+            </div>
             <button
                 id="copy-all-button"
                 class="mt-6 w-full py-2 px-4 bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-lg shadow-md transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transform hover:-translate-y-0.5"
@@ -68,8 +98,12 @@
                 Sao chép tất cả văn bản
             </button>
             <div id="copy-message" class="mt-2 text-green-700 text-sm text-center hidden">
-                </div>
+            </div>
         </div>
+    </div>
+
+    <div id="paste-overlay" class="hidden">
+        Nhả chuột để dán ảnh (Ctrl+V)
     </div>
 
     <script>
@@ -87,6 +121,7 @@
         const resultsGrid = document.getElementById('results-grid');
         const copyAllButton = document.getElementById('copy-all-button');
         const copyMessageElement = document.getElementById('copy-message');
+        const pasteOverlay = document.getElementById('paste-overlay'); // New: Paste Overlay
 
         // Function to update loading state and UI
         function setLoadingState(isLoading) {
@@ -133,13 +168,55 @@
             }, 3000);
         }
 
-        // Handles image file selection
-        imageUploadInput.addEventListener('change', (event) => {
-            selectedImages = Array.from(event.target.files);
+        // Renders the selected image previews
+        function renderSelectedImagesPreview() {
+            selectedImagesPreview.innerHTML = ''; // Clear previous previews
+            if (selectedImages.length > 0) {
+                selectedImages.forEach((image, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'relative text-center group'; // Add group for hover effects
+                    const img = document.createElement('img');
+                    img.src = URL.createObjectURL(image);
+                    img.alt = `Ảnh đã chọn ${index + 1}`;
+                    img.className = 'max-h-32 w-full object-contain mx-auto rounded-lg shadow-md border border-gray-200';
+                    
+                    const p = document.createElement('p');
+                    p.className = 'text-xs text-gray-600 mt-1 truncate';
+                    p.textContent = image.name;
+
+                    // Add a remove button
+                    const removeButton = document.createElement('button');
+                    removeButton.className = 'absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 focus:outline-none focus:ring-2 focus:ring-red-400';
+                    removeButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>';
+                    removeButton.title = `Xóa ảnh ${image.name}`;
+                    removeButton.onclick = (e) => {
+                        e.stopPropagation(); // Prevent parent click if any
+                        removeImage(index);
+                    };
+
+                    div.appendChild(img);
+                    div.appendChild(p);
+                    div.appendChild(removeButton);
+                    selectedImagesPreview.appendChild(div);
+                });
+            }
+        }
+
+        // Removes an image from the selectedImages array
+        function removeImage(indexToRemove) {
+            URL.revokeObjectURL(selectedImages[indexToRemove].src); // Clean up object URL
+            selectedImages.splice(indexToRemove, 1);
+            updateUIBasedOnSelectedImages();
+        }
+
+        // Central function to update UI after image selection/deselection
+        function updateUIBasedOnSelectedImages() {
             extractedResults = []; // Clear previous results
             setGlobalError('');
             showCopyMessage('');
             
+            renderSelectedImagesPreview(); // Re-render previews
+
             // Update OCR button state
             setLoadingState(false); // Reset button state
             ocrButton.disabled = selectedImages.length === 0;
@@ -150,28 +227,16 @@
                 ocrButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
                 ocrButton.classList.add('bg-purple-600', 'hover:bg-purple-700', 'transform', 'hover:-translate-y-0.5');
             }
-
-            // Display image previews
-            selectedImagesPreview.innerHTML = ''; // Clear previous previews
-            if (selectedImages.length > 0) {
-                selectedImages.forEach((image, index) => {
-                    const div = document.createElement('div');
-                    div.className = 'text-center';
-                    const img = document.createElement('img');
-                    img.src = URL.createObjectURL(image);
-                    img.alt = `Ảnh đã chọn ${index + 1}`;
-                    img.className = 'max-h-32 w-full object-contain mx-auto rounded-lg shadow-md border border-gray-200';
-                    const p = document.createElement('p');
-                    p.className = 'text-xs text-gray-600 mt-1 truncate';
-                    p.textContent = image.name;
-
-                    div.appendChild(img);
-                    div.appendChild(p);
-                    selectedImagesPreview.appendChild(div);
-                });
-            }
             extractedResultsSection.classList.add('hidden'); // Hide results section until OCR is run
             resultsGrid.innerHTML = ''; // Clear results grid
+        }
+
+        // Handles image file selection
+        imageUploadInput.addEventListener('change', (event) => {
+            selectedImages = Array.from(event.target.files);
+            updateUIBasedOnSelectedImages();
+            // Clear the input after selecting to allow re-selection of same files if needed
+            event.target.value = '';
         });
 
         // Converts image file to Base64 string
@@ -218,7 +283,9 @@
 
                 // In the Canvas environment, the API key is provided automatically.
                 // If running locally, replace this with your actual API key obtained from Google AI Studio.
-                const apiKey = "AIzaSyDis9iQyqeofh7TBizqoYTDOIxynNGf-MU"; 
+                // IMPORTANT: For production, do NOT hardcode API keys in client-side code.
+                // Use a backend proxy to protect your API key.
+                const apiKey = "AIzaSyDis9iQyqeofh7TBizqoYTDOIxynNGf-MU"; // Placeholder, replace with your actual API key
                 const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
                 const response = await fetch(apiUrl, {
@@ -400,6 +467,74 @@
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
                 showCopyMessage('Tất cả văn bản đã được sao chép!');
+            }
+        });
+
+        // --- NEW: Handle Paste Event for Images ---
+        document.body.addEventListener('paste', (event) => {
+            event.preventDefault(); // Prevent default paste behavior (e.g., pasting text into a text field)
+
+            const clipboardItems = event.clipboardData.items;
+            let imageFound = false;
+
+            for (let i = 0; i < clipboardItems.length; i++) {
+                const item = clipboardItems[i];
+                // Check if the item is a file and an image
+                if (item.kind === 'file' && item.type.startsWith('image/')) {
+                    const blob = item.getAsFile();
+                    // Create a File object from the blob. Give it a default name.
+                    const newFile = new File([blob], `pasted_image_${Date.now()}.png`, { type: blob.type });
+                    
+                    selectedImages = [newFile]; // Replace existing images with the pasted one(s)
+                    // If you want to add to existing images instead of replacing:
+                    // selectedImages.push(newFile); 
+
+                    updateUIBasedOnSelectedImages();
+                    imageFound = true;
+                    setGlobalError(''); // Clear any previous error
+                    break; // Only process the first image found
+                }
+            }
+
+            if (!imageFound) {
+                setGlobalError('Không tìm thấy hình ảnh nào trong clipboard để dán.');
+            }
+        });
+
+        // Optional: Provide visual feedback for pasting
+        document.body.addEventListener('dragenter', (e) => {
+            if (e.dataTransfer.types.includes('Files')) {
+                // Not strictly for paste, but good for drag-and-drop visual
+                // pasteOverlay.classList.add('active');
+            }
+        });
+
+        document.body.addEventListener('dragleave', (e) => {
+            // pasteOverlay.classList.remove('active');
+        });
+
+        document.body.addEventListener('drop', (e) => {
+            // pasteOverlay.classList.remove('active');
+        });
+        
+        // Show overlay when pressing Ctrl+V
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                pasteOverlay.classList.add('active');
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (pasteOverlay.classList.contains('active') && (!e.ctrlKey && !e.metaKey && e.key !== 'v')) {
+                 pasteOverlay.classList.remove('active');
+            }
+        });
+        document.body.addEventListener('mousemove', () => {
+            // Remove overlay if mouse moves significantly after keyup, implies user is not pasting
+            if (pasteOverlay.classList.contains('active')) {
+                // This is a bit aggressive, you might want a timeout
+                // Or tie it to the paste event itself
+                // For simplicity, we'll rely on keyup for now.
             }
         });
 
